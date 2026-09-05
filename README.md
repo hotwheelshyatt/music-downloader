@@ -50,6 +50,13 @@ Check that Python works:
 python --version
 ```
 
+## 1.1 make venv folder
+
+```bash
+python -m venv venv
+. venv/bin/activate
+```
+
 ## 2. Install the Python Packages
 
 Open a terminal or Command Prompt in the MusicDownloader folder and run:
