@@ -56,6 +56,7 @@ Open a terminal or Command Prompt in the MusicDownloader folder and run:
 
 ```bash
 python -m pip install -U yt-dlp mutagen yt-dlp-ejs
+npm install -g deno
 ```
 
 The program uses:
