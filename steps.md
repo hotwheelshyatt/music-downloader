@@ -2,9 +2,11 @@
 
 This document expands **step 1, “Normalize and validate CSV input,”** in [todo.md](todo.md). Complete this milestone before adding MusicBrainz lookup or changing YouTube matching. The result should be a trustworthy list of songs for the later stages to use.
 
-## Why this is next
+**Status:** Completed in `main.py`; the input checks are covered by `tests/test_input.py`. Step 2 in [todo.md](todo.md) remains next. The sections below record the implementation checklist and its acceptance criteria.
 
-`main.py` currently has two relevant functions: `find_input_file()` chooses a `.csv` or `.txt` file, and `load_songs()` uses `csv.DictReader` to read CSV rows. The loader expects the exact headers `Track name` and `Artist name`, trims those two values, and prints every row and the growing song list. It rejects `.txt` files even though the picker offers them. Missing headers or cells can produce an unhelpful error when the code tries to call `.strip()`.
+## Why this was next
+
+Before this milestone, `find_input_file()` offered `.csv` and `.txt` files, while `load_songs()` rejected `.txt` files. The loader expected the exact headers `Track name` and `Artist name`, printed every row and the growing song list, and could produce an unhelpful `.strip()` error for missing data. The work below addressed those input problems.
 
 The two included examples should both remain usable:
 

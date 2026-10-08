@@ -26,7 +26,9 @@ Bohemian Rhapsody,Queen
 Take On Me,a-ha
 ```
 
-The included `songs.csv` is a small example. `My Spotify Library.csv` also has the required headers and can be selected by setting `INPUT_FILE = "My Spotify Library.csv"`. Its extra columns are currently ignored; using them for better searches and tags is planned in [todo.md](todo.md).
+The included `songs.csv` is a small example. `My Spotify Library.csv` also has the required headers and can be selected by setting `INPUT_FILE = "My Spotify Library.csv"`. Its extra columns are read and preserved, but are not yet used for searches or MP3 tags; that work is planned in [todo.md](todo.md).
+
+The input picker also recognizes CSV-formatted `.txt` files. It previews and validates one, then asks before converting it to `.csv`. It will not overwrite an existing CSV.
 
 ## Run
 
@@ -39,8 +41,8 @@ With the virtual environment active, run `python main.py` from this folder. Revi
 | `yt-dlp` or Mutagen is missing | Activate the virtual environment, then run `python -m pip install -U "yt-dlp[default]" mutagen`. |
 | FFmpeg was not found | Install FFmpeg and confirm `ffmpeg -version` works in the same terminal. |
 | YouTube reports missing JavaScript support | Check `deno --version` and reinstall `yt-dlp` with the command above. See the [yt-dlp setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS). |
-| Input file not found | Check `INPUT_FILE` in `main.py` and put that CSV beside the script. With `INPUT_FILE = None`, the script asks which file to use if it finds several. |
-| CSV load fails | Use the exact headers `Track name,Artist name` and fill both columns. `.txt` files are offered by the picker but currently fail to load. |
+| Input file not found | Check `INPUT_FILE` in `main.py` and put that file beside the script. With `INPUT_FILE = None`, the script asks which file to use if it finds several. |
+| CSV load fails | Use the headers `Track name,Artist name` and fill both columns. The error names missing headers, malformed rows, or invalid UTF-8; correct the reported line and retry. |
 | Wrong recording downloaded | The current search takes the first YouTube result. Check the `Selected:` URL shown in the terminal; improved matching is on the todo list. |
 | YouTube search fails with HTTP 403 | Check whether this computer can access YouTube. The 403 recorded in `download_errors.txt` was caused by a network block; restore access before retrying. Diagnose other 403 errors separately. |
 | A song fails while others continue | Read `download_errors.txt` beside the script. Correct the issue and rerun; existing MP3s are normally skipped. |

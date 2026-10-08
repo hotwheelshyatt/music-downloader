@@ -2,7 +2,7 @@
 
 ## Current behavior and goal
 
-`main.py` reads a CSV, searches YouTube, downloads the first result as an MP3, and writes the input track name and artist plus whatever metadata and artwork the YouTube upload provides. The current CSV loader requires the exact headers `Track name` and `Artist name`. It reads extra columns but does not pass them into the download and tagging flow. It also offers `.txt` files in the picker even though the loader rejects them.
+`main.py` now validates CSV input, normalizes supported headers, and preserves original row fields. It can preview and convert CSV-formatted `.txt` files after confirmation. The download flow still passes only title and artist downstream, searches YouTube, downloads the first result as an MP3, and writes whatever metadata and artwork the YouTube upload provides.
 
 **Target flow:** CSV validation → preserve and normalize row data → identify a recording and release with MusicBrainz → search and evaluate multiple YouTube candidates → download only a confident match → apply tags and artwork → record a clear outcome for every row.
 
@@ -20,16 +20,16 @@
 
 **Decide first**
 
-- [ ] List supported header names and their normalized names. Specify how unknown columns and duplicate headers are retained or reported.
-- [ ] Define validation for missing title/artist, blank rows, malformed rows, and a likely missing header. Decide what the user sees before any proposed correction.
-- [ ] Define the `.txt` conversion flow: preview CSV-like text, validate it, ask before renaming to `.csv`, and refuse to overwrite an existing file. The picker must not claim that an unsupported file can be loaded directly.
+- [x] List supported header names and their normalized names. Specify how unknown columns and duplicate headers are retained or reported.
+- [x] Define validation for missing title/artist, blank rows, malformed rows, and a likely missing header. Decide what the user sees before any proposed correction.
+- [x] Define the `.txt` conversion flow: preview CSV-like text, validate it, ask before renaming to `.csv`, and refuse to overwrite an existing file. The picker must not claim that an unsupported file can be loaded directly.
 
 **Implement**
 
-- [ ] Use `csv.DictReader` for the two-column `songs.csv` and wider TuneMyMusic/Spotify-style exports such as `My Spotify Library.csv`.
-- [ ] Handle quoted commas, UTF-8, and UTF-8 BOM. Report the row number and a specific fix for bad data.
-- [ ] If the first row appears to be song data, ask whether to treat it as data; never silently discard it as a header.
-- [ ] Remove the current per-row debug dump after useful import summaries and errors exist.
+- [x] Use `csv.DictReader` for the two-column `songs.csv` and wider TuneMyMusic/Spotify-style exports such as `My Spotify Library.csv`.
+- [x] Handle quoted commas, UTF-8, and UTF-8 BOM. Report the row number and a specific fix for bad data.
+- [x] If the first row appears to be song data, ask whether to treat it as data; never silently discard it as a header.
+- [x] Remove the current per-row debug dump after useful import summaries and errors exist.
 
 ### 2. Preserve each row's metadata
 
@@ -176,7 +176,7 @@
 
 - [ ] Investigate AcoustID/Chromaprint only after the first implementation works. Proposed flow: YouTube candidate audio → audio fingerprint → AcoustID → MusicBrainz recording. Research cost, API/usage rules, added downloads, and whether it materially improves matching before adding it. This is not required for the first version.
 
-## Existing bug reports
+## Issue history and open bugs
 
 ### Diagnosed network issue: YouTube search returned HTTP 403
 
@@ -184,11 +184,11 @@
 - **Confirmed cause for this incident:** Testing found a network block on this computer that prevented access to YouTube. The recorded 403 came from unavailable YouTube connectivity; it is not an open `yt-dlp` bug to investigate.
 - **Action:** No code fix is planned for this incident. Restore YouTube access on the network before retrying the song. Other HTTP 403 errors should be diagnosed separately rather than assumed to have the same cause.
 
-### Picker offers `.txt` files that the loader rejects
+### Resolved: picker offered `.txt` files that the loader rejected
 
 - **Reproduction:** Set `INPUT_FILE = None`, select a `.txt` file, and load it.
-- **Actual:** `find_input_file()` offers the file; `load_songs()` raises `Input file must be CSV or TXT.`
-- **Expected:** The picker follows the CSV-only policy and offers validated, confirmed conversion for CSV-like `.txt` files.
+- **Previous behavior:** `find_input_file()` offered the file; `load_songs()` raised `Input file must be CSV or TXT.`
+- **Resolution:** The picker labels `.txt` as a conversion choice. The program previews and validates it, asks before conversion, and refuses to overwrite an existing `.csv` file.
 
 ### Different songs can share one output filename
 

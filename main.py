@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -19,8 +20,8 @@ DESTINATION = r"/Users/localadmin/Music/harrys_music"
 
 # Input file.
 #
-# If this is None, the script automatically searches the same
-# folder as this Python file for the first CSV or TXT file.
+# If this is None, the script searches the same folder for CSV files
+# or TXT files that can be validated and converted with confirmation.
 #
 # Examples:
 # INPUT_FILE = "songs.csv"
@@ -50,6 +51,18 @@ SCRIPT_FOLDER = Path(__file__).resolve().parent
 DESTINATION_PATH = Path(DESTINATION)
 ERROR_LOG = SCRIPT_FOLDER / "download_errors.txt"
 
+# Only these export headers have a defined meaning. Other columns are kept
+# unchanged in original_fields for later processing.
+HEADER_NAMES = {
+    "Track name": "track_name",
+    "Artist name": "artist_name",
+    "Album": "album",
+    "Playlist name": "playlist_name",
+    "Type": "export_type",
+    "ISRC": "isrc",
+    "Spotify - id": "spotify_id",
+}
+
 
 # ------------------------------------------------------------
 # Utility functions
@@ -74,90 +87,223 @@ def clean_filename(name):
 
 def find_input_file():
     """
-    Find the input CSV/TXT file next to this Python script.
+    Select a CSV file, or a TXT file to validate and convert to CSV.
     """
 
     if INPUT_FILE:
         path = SCRIPT_FOLDER / INPUT_FILE
 
-        if not path.exists():
+        if not path.is_file():
             raise FileNotFoundError(
                 f"Configured input file does not exist:\n{path}"
             )
 
+        if path.name.lower() == ERROR_LOG.name.lower():
+            raise ValueError("The download error log is not a song list.")
+
         return path
 
-    files = []
-
-    for extension in ("*.csv", "*.txt"):
-        files.extend(SCRIPT_FOLDER.glob(extension))
-
-    # Don't accidentally use our own error log.
-    files = [
-        f for f in files
-        if f.name.lower() != ERROR_LOG.name.lower()
-    ]
+    files = sorted(
+        (
+            path for path in SCRIPT_FOLDER.iterdir()
+            if path.is_file()
+            and path.suffix.lower() in (".csv", ".txt")
+            and path.name.lower() != ERROR_LOG.name.lower()
+        ),
+        key=lambda path: path.name.lower()
+    )
 
     if not files:
         raise FileNotFoundError(
-            "No CSV or TXT input file was found next to the Python script."
+            "No CSV input file or convertible TXT file was found next to the Python script."
         )
 
     if len(files) > 1:
         print("Multiple input files were found:")
         for i, file in enumerate(files, 1):
-            print(f"  {i}. {file.name}")
+            label = " (validate and convert to CSV)" if file.suffix.lower() == ".txt" else ""
+            print(f"  {i}. {file.name}{label}")
 
         print()
         choice = input("Enter the number of the input file: ").strip()
 
         try:
-            index = int(choice) - 1
-            return files[index]
-        except (ValueError, IndexError):
+            index = int(choice)
+        except ValueError:
             raise ValueError("Invalid input file selection.")
+        if not 1 <= index <= len(files):
+            raise ValueError("Invalid input file selection.")
+        return files[index - 1]
     return files[0]
 
 
-def load_songs(input_file):
+def _read_song_rows(input_file):
+    """Validate every CSV record before returning any songs.
+
+    source_line is the physical line where a record ends. For a quoted
+    multiline field, this is the last line occupied by that record.
     """
-    Read songs from CSV or TXT.
+    try:
+        with input_file.open("r", encoding="utf-8-sig", newline="") as file:
+            header_reader = csv.reader(file, strict=True)
+            csv_reader = header_reader
+            while True:
+                headers = next(header_reader, None)
+                if headers is None:
+                    raise ValueError("The file is empty or has no header row.")
+                if any(value.strip() for value in headers):
+                    break
+            header_line = header_reader.line_num
 
-    Expected format:
+            stripped_headers = [header.strip() for header in headers]
+            if any(not name for name in stripped_headers):
+                raise ValueError(f"Line {header_line}: the CSV contains an empty column header.")
+            duplicates = sorted({name for name in stripped_headers
+                                 if stripped_headers.count(name) > 1})
+            if duplicates:
+                raise ValueError(
+                    f"Line {header_line}: Duplicate CSV header(s): " + ", ".join(duplicates)
+                )
+            missing = [name for name in ("Track name", "Artist name")
+                       if name not in stripped_headers]
+            headerless = False
+            if missing and len(headers) == 2 and all(stripped_headers) \
+                    and not any(name in HEADER_NAMES for name in stripped_headers):
+                print(f"First row may be song data: {headers[0]!r}, {headers[1]!r}")
+                answer = input(
+                    "Treat it as a song and use Track name,Artist name headers in memory? [y/N]: "
+                ).strip().lower()
+                headerless = answer in ("y", "yes")
+                if headerless:
+                    headers = ["Track name", "Artist name"]
+                    stripped_headers = headers[:]
+                    missing = []
 
-    Track name,Artist name,
-    Song One,Artist One
-    Song Two,Artist Two
-
-    OR
-    (example from https://www.tunemymusic.com/transfer)
-    Track name,Artist name,Album,Playlist name,Type,ISRC,Spotify - id
-    "Awake","Tycho","Awake","ADHD Focus Music (No Lyrics)","Playlist","US2J71309901","5lB3bZKPhng9s4hKB1sSIe"
-    "I Came Running","Ancient Astronauts","We Are To Answer","ADHD Focus Music (No Lyrics)","Playlist","USESL0914702","62e6CJOmmYiiwS9yKE5Gg6"
-
-    """
-
-    songs = []
-
-    if input_file.suffix.lower() == ".csv":
-
-        with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
-
-            reader = csv.DictReader(file)
-
+            if missing:
+                raise ValueError(
+                    f"Line {header_line}: Missing required CSV header(s): " + ", ".join(missing)
+                    + ". Expected Track name,Artist name."
+                )
+            if headerless:
+                file.seek(0)
+                line_offset = 0
+            else:
+                line_offset = header_line
+            extra_columns = object()
+            reader = csv.DictReader(
+                file,
+                fieldnames=headers,
+                restkey=extra_columns,
+                strict=True,
+            )
+            csv_reader = reader
+            songs = []
+            errors = []
             for row in reader:
-                # Track name,Artist name
+                line = line_offset + reader.line_num
+                extra = row.get(extra_columns, [])
+                values = [row[name] for name in headers] + extra
+                if all(value is None or not value.strip() for value in values):
+                    continue
 
-                # cleans up trailing+leading white space in first 2 colloms
-                row['Track name'] = row['Track name'].strip()
-                row['Artist name'] = row['Artist name'].strip()
+                if extra:
+                    errors.append(f"Line {line}: too many columns; check quoting or remove extra cells.")
+                    continue
+                absent = [name for name in headers if row[name] is None]
+                if absent:
+                    errors.append(f"Line {line}: too few columns; missing {', '.join(absent)}.")
+                    continue
 
-                songs.append(row)
-                print(f"{row}\n{songs}")
+                raw_fields = {name: row[name] for name in headers}
+                normalized = {
+                    HEADER_NAMES[clean_name]: row[raw_name].strip()
+                    for raw_name, clean_name in zip(headers, stripped_headers)
+                    if clean_name in HEADER_NAMES
+                }
+                empty = [name for name in ("Track name", "Artist name")
+                         if not normalized[HEADER_NAMES[name]]]
+                if empty:
+                    errors.append(f"Line {line}: empty required field(s): {', '.join(empty)}.")
+                    continue
 
-    else:
-        raise ValueError("Input file must be CSV or TXT.")
-    return songs
+                songs.append({
+                    **normalized,
+                    "original_fields": raw_fields,
+                    "source_line": line,
+                })
+
+            if errors:
+                raise ValueError("CSV validation failed:\n" + "\n".join(errors))
+            if not songs:
+                raise ValueError("No songs were found in the input file.")
+            return songs
+    except UnicodeDecodeError as error:
+        raise ValueError(f"Input must be UTF-8 encoded: {input_file.name}") from error
+    except csv.Error as error:
+        underlying_reader = getattr(csv_reader, "reader", csv_reader)
+        line = underlying_reader.line_num
+        if isinstance(csv_reader, csv.DictReader):
+            line += line_offset
+        raise ValueError(
+            f"Malformed CSV in {input_file.name} near line {line}: {error}. Check quoting."
+        ) from error
+
+
+def load_songs(input_file):
+    """Read and validate a CSV file, preserving all original fields."""
+    input_file = Path(input_file)
+    if input_file.suffix.lower() != ".csv":
+        raise ValueError("Input file must be CSV; TXT files require confirmed conversion.")
+    return _read_song_rows(input_file)
+
+
+def prepare_input_file(input_file):
+    """Validate a selected file and safely convert CSV-like TXT on request."""
+    input_file = Path(input_file)
+    if input_file.suffix.lower() == ".csv":
+        return input_file, load_songs(input_file)
+    if input_file.suffix.lower() != ".txt" or input_file.name.lower() == ERROR_LOG.name.lower():
+        raise ValueError("Choose a CSV file or a CSV-formatted TXT file to convert.")
+
+    print(f"Preview of {input_file.name}:")
+    try:
+        with input_file.open("r", encoding="utf-8-sig", newline="") as file:
+            for row_number, row in enumerate(csv.reader(file, strict=True), 1):
+                if row_number > 3:
+                    break
+                print("  " + ", ".join(repr(value[:80]) for value in row))
+    except UnicodeDecodeError as error:
+        raise ValueError(f"Input must be UTF-8 encoded: {input_file.name}") from error
+    except csv.Error as error:
+        raise ValueError(f"Malformed CSV in {input_file.name}: {error}") from error
+
+    songs = _read_song_rows(input_file)
+    target = input_file.with_suffix(".csv")
+    if target.exists():
+        raise FileExistsError(f"Cannot convert: {target.name} already exists. Neither file was changed.")
+    answer = input(f"Rename {input_file.name} to {target.name}? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        raise ValueError("TXT-to-CSV conversion cancelled; the file was not changed.")
+
+    # Exclusive creation prevents a file appearing after the check from being overwritten.
+    target_created = False
+    try:
+        with input_file.open("rb") as source:
+            with target.open("xb") as destination:
+                target_created = True
+                shutil.copyfileobj(source, destination)
+    except Exception:
+        if target_created:
+            target.unlink()
+        raise
+    try:
+        input_file.unlink()
+    except OSError as error:
+        raise OSError(
+            f"Created {target.name}, but could not remove {input_file.name}; both files remain."
+        ) from error
+    print(f"Converted {input_file.name} to {target.name}.")
+    return target, songs
 
 
 # ------------------------------------------------------------
@@ -978,20 +1124,7 @@ def main():
 
     try:
         input_file = find_input_file()
-    except Exception as error:
-        print()
-        print("ERROR:")
-        print(error)
-        print()
-        input("Press Enter to exit...")
-        return
-
-    print(f"Input file:")
-    print(f"  {input_file.name}")
-    print()
-
-    try:
-        songs = load_songs(input_file)
+        input_file, songs = prepare_input_file(input_file)
     except Exception as error:
         print()
         print("ERROR reading input file:")
@@ -1000,11 +1133,9 @@ def main():
         input("Press Enter to exit...")
         return
 
-    if not songs:
-        print("No songs were found in the input file.")
-        input("Press Enter to exit...")
-        return
-
+    print(f"Input file:")
+    print(f"  {input_file.name}")
+    print()
     print(f"Songs found: {len(songs)}")
     print()
 
@@ -1018,7 +1149,7 @@ def main():
     for number, item in enumerate(songs, 1):
         print(
             f"{number:3}. "
-            f"{item['Track name']} - {item['Artist name']}"
+            f"{item['track_name']} - {item['artist_name']}"
         )
 
     print()
@@ -1049,8 +1180,8 @@ def main():
             process_song(
                 number,
                 len(songs),
-                item["Track name"],
-                item["Artist name"]
+                item["track_name"],
+                item["artist_name"]
             )
 
             successful += 1
@@ -1076,7 +1207,7 @@ def main():
             failed += 1
 
             error_message = (
-                f"{item['Track name']} - {item['Artist name']}\n"
+                f"{item['track_name']} - {item['artist_name']}\n"
                 f"{error}\n"
                 f"{'-' * 60}\n"
             )
