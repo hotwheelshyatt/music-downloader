@@ -1,85 +1,64 @@
-# Next step: make CSV input reliable
+# Next step: fix the open bugs
 
-This document expands **step 1, “Normalize and validate CSV input,”** in [todo.md](todo.md). Complete this milestone before adding MusicBrainz lookup or changing YouTube matching. The result should be a trustworthy list of songs for the later stages to use.
+The CSV input milestone is complete. The next milestone is to resolve **all three open issues** in [bugs_to_fix.md](bugs_to_fix.md): first-result YouTube selection, MP3 filename collisions, and the unusable `SEARCH_YOUTUBE = False` setting. This is a plan for the next implementation pass; none of these fixes is marked complete yet.
 
-**Status:** Completed in `main.py`; the input checks are covered by `tests/test_input.py`. Step 2 in [todo.md](todo.md) remains next. The sections below record the implementation checklist and its acceptance criteria.
+The recorded YouTube HTTP 403 came from a network block on this computer. The `.txt` conversion bug is already fixed. Neither belongs in this bug-fix pass unless new evidence shows a separate problem.
 
-## Why this was next
+## 1. Keep a baseline and settle the behavior
 
-Before this milestone, `find_input_file()` offered `.csv` and `.txt` files, while `load_songs()` rejected `.txt` files. The loader expected the exact headers `Track name` and `Artist name`, printed every row and the growing song list, and could produce an unhelpful `.strip()` error for missing data. The work below addressed those input problems.
+Before changing the download path, run `python3 -B -m unittest discover -s tests -q` (and the same command with `venv/bin/python`). Keep the existing CSV tests passing. Add focused tests that reproduce each of the three open bugs without contacting YouTube or writing music into the real destination folder.
 
-The two included examples should both remain usable:
+Decide these behaviors explicitly and record them in code comments or documentation:
 
-| File | Headers | Important detail |
-| --- | --- | --- |
-| `songs.csv` | `Track name`, `Artist name` | One artist value has extra surrounding spaces. |
-| `My Spotify Library.csv` | The two required headers plus `Album`, `Playlist name`, `Type`, `ISRC`, `Spotify - id` | It has a UTF-8 byte-order mark (BOM) and extra fields to preserve for step 2. |
+- **Unavailable direct-URL mode:** Recommended choice: remove the `SEARCH_YOUTUBE` switch for now and always use the supported search path. If direct URLs are needed instead, first define their CSV column, validation, and how a row chooses between search and a supplied URL. Do not leave a switch that makes every new song fail.
+- **Same filename:** Define when an existing MP3 is the *same recording* and may be skipped, and when it is a different recording that needs a distinct name. An existing filename alone is insufficient evidence.
+- **Uncertain match:** Define a minimum confidence rule and what happens when the best YouTube results are tied or below that rule. The safe outcome is to report the row and avoid an automatic download.
 
-## 1. Set the input contract before editing code
+## 2. Fix the unusable YouTube-search setting
 
-Write down the agreed behavior in the loader's documentation and tests:
+In `main.py`, `process_song()` currently raises when `SEARCH_YOUTUBE` is false because no direct URL can reach it. Apply the decision from step 1:
 
-- **Required data:** Each nonblank song row needs a nonempty track name and artist name. A CSV with no valid songs should stop with a clear message.
-- **Supported headers:** Start with the exact headers used by the supplied files. Define any additional aliases explicitly; do not guess that arbitrary column names mean title or artist. Normalize supported names to internal names such as `track_name` and `artist_name`.
-- **Original data:** Keep the original headers and values alongside normalized fields. For example, a trimmed `artist_name` may be used for matching, while the original `Artist name` cell remains available. Unknown extra columns must not disappear.
-- **Duplicate or missing headers:** Reject them with a message naming the problem. A simple dictionary can overwrite duplicate column names, so detect duplicates before building per-row dictionaries.
-- **Malformed rows:** Decide and document how to handle too many or too few cells. Recommended rule: report every bad row found, then stop the import before any download; never silently drop a song or start a partial download run.
-- **Blank rows:** Ignore fully empty rows, but report an incomplete row that has only a track or only an artist.
-- **Row location:** Give an understandable record number or source line in each error. Quoted fields can span physical lines, so label the number accurately.
+1. If removing the switch, remove its configuration line and dead branch, keep the working search path, and update README guidance. Do not suggest that users can disable search.
+2. If supporting direct URLs, carry a validated URL from the CSV row through `main()` into `process_song()`. Define what happens when the URL is blank, invalid, or present alongside search metadata.
+3. Test the selected behavior and confirm that no documented configuration value causes every song to fail before downloading.
 
-Use an explicit initial mapping for the known export fields:
+## 3. Fix output filenames and duplicate checks
 
-| CSV header | Internal name | Meaning |
-| --- | --- | --- |
-| `Track name` | `track_name` | Required song title. |
-| `Artist name` | `artist_name` | Required artist. |
-| `Album` | `album` | Album information, if supplied. |
-| `Playlist name` | `playlist_name` | Playlist context; never the MP3 album. |
-| `Type` | `export_type` | Keep as export context. |
-| `ISRC` | `isrc` | Keep for later recording lookup. |
-| `Spotify - id` | `spotify_id` | Keep as a source identifier. |
+`process_song()` and `download_song()` currently use a title-only MP3 filename. Both must use one shared naming and identity rule; otherwise one function may skip a file that the other would name differently.
 
-Preserve the original labels and values, including unknown columns. This milestone does not use the extra fields for lookup or MP3 tags.
+1. Start with a safe `Artist - Track name.mp3` base name. Apply the same filename cleaning in the early skip check, the `yt-dlp` output template, and the final MP3 lookup.
+2. Decide how to distinguish two recordings by the same artist with the same title. Prefer a stable, verified recording identifier once one is available. If the program cannot prove two files are the same recording, do not overwrite or silently skip one as a duplicate; report the collision or choose an unambiguous stable suffix.
+3. Decide how `SKIP_EXISTING = True` and `False` behave for a verified same recording and for a different recording. Neither setting should overwrite a different recording accidentally.
+4. Consider filenames that become equal after cleaning, case differences on different filesystems, and repeated rows in the input CSV.
+5. Test different artists with one title, one artist with multiple recordings of one title, a true repeated song, and both values of `SKIP_EXISTING` using a temporary destination.
 
-## 2. Make file selection match the supported format
+## 4. Replace first-result selection with verified matching
 
-Update `find_input_file()` and its messages so users are offered CSV files as normal inputs. If `INPUT_FILE` names a missing file, show that filename and where the program looked. If several CSV files are found, show numbered choices and reject `0`, negative numbers, nonnumbers, and choices beyond the list.
+This bug needs more than changing `entries[0]`. Complete the relevant work in [todo.md](todo.md) steps 2–8 before allowing automatic selection. Keep the CSV's track name and artist as the requested title and artist.
 
-For a `.txt` file that appears to contain CSV data:
+1. **Carry the full row:** Pass the normalized title and artist plus original CSV fields (including album and ISRC when present) through the lookup and search flow. Do not discard them at `process_song()`.
+2. **Research the metadata provider:** Compare MusicBrainz and Discogs, and Gracenote only if access is realistic. Verify MusicBrainz API endpoints, fields, rate limits, User-Agent and usage rules from primary documentation. Use MusicBrainz as the initial provider if that research supports it.
+3. **Identify the target:** Use valid CSV identifiers, title, artist, album, and version clues to evaluate multiple MusicBrainz matches. Keep recordings, releases, and release groups distinct. Record why a recording and release were selected; stop the row when no reliable target can be identified.
+4. **Inspect several YouTube results:** Return candidate information rather than one URL. Gather only fields actually available to the search flow, and document which fields need a further metadata lookup.
+5. **Score candidates:** Compare each candidate with the verified target using title, artist, duration, album or identifiers when available, description, channel, and version clues. Penalize covers, live performances, remixes, slowed or sped-up versions, nightcore, karaoke, instrumentals, and unrelated videos unless the CSV asks for that version. Do not treat a matching title alone as proof.
+6. **Apply a confidence rule:** Download only a candidate that clears the documented threshold and is clearly better than alternatives. Report the chosen URL, score, and main reasons. For a tie, weak match, or missing target, report the ambiguity and continue to the next row without downloading.
 
-1. Preview its first few rows without changing the file.
-2. Validate its encoding, headers, column structure, and required values with the same rules used for `.csv`.
-3. Explain that the program uses CSV files and ask whether to rename this file with a `.csv` extension.
-4. If the user declines, leave the file untouched and end input selection without downloading.
-5. If a destination `.csv` already exists, leave both files untouched and explain the collision. Rename only after explicit confirmation and successful validation.
+Keep metadata source priority from [todo.md](todo.md): CSV first, verified MusicBrainz second, YouTube third, and empty when uncertain. Do not put `Playlist name` in the album tag. Later tag and artwork improvements remain separate TODO work unless they are needed to verify the selected recording.
 
-Do not show `.txt` as directly supported if the program has not performed this conversion. Do not change `download_errors.txt` or mistake it for a song list.
+## 5. Test the combined download path
 
-## 3. Read and validate the CSV
+Use mocked MusicBrainz and YouTube responses for repeatable tests; do not make the automated suite depend on live services. Check at least:
 
-Keep `csv.DictReader` for the actual rows. Open files as UTF-8 with BOM handling and the correct CSV newline handling; do not split lines on commas. Inspect the header before iterating rows so missing and duplicate names can be reported clearly. Validate every row before returning the song list.
+- The first YouTube result is a cover or live version and a later result matches the target; only the later result can be selected.
+- No result reaches the threshold, or two results are too close; no download occurs and the reason is shown.
+- A CSV row explicitly requests an alternate version; the matcher does not incorrectly reject that version.
+- MusicBrainz is unavailable or returns ambiguous matches; the row is reported and later rows continue.
+- Two artists share a title, one artist has two recordings with one title, and an MP3 already exists; no different recording is skipped or overwritten.
+- The chosen `SEARCH_YOUTUBE` configuration behavior works as documented.
+- The existing CSV input suite still passes, including the supplied `songs.csv` and `My Spotify Library.csv` fixtures.
 
-If the first row appears to contain a song rather than headers, show that row in a preview and ask whether to treat it as data. For an unambiguous two-column list, a confirmed choice may supply the two required column names in memory. Otherwise, ask the user to fix the file. Never silently treat the first song as a header or rewrite the CSV without permission.
+A live end-to-end check can be done only where YouTube is reachable and with a small, permitted test song. Record separately whether it was run; mocked tests do not prove live site access.
 
-Remove the current `print(f"{row}\n{songs}")` debug output. After loading, show a short summary: input filename, number of valid songs, and any errors. Keep the existing confirmation before downloads.
+## Done when
 
-## 4. Define the handoff to the following milestone
-
-The loader should return each song with its normalized track and artist, the original CSV fields, and its source row location. Step 2 of [todo.md](todo.md) will carry that whole record through matching, downloading, and tagging. Do not add MusicBrainz calls, change YouTube selection, or write MP3 tags as part of this input milestone.
-
-If the old download loop still reads `item['Track name']` and `item['Artist name']`, either keep those keys available during this milestone or update the loop to read the normalized names. The program must still show the same title and artist for the supplied CSV files.
-
-## 5. Verify the milestone
-
-Use temporary test CSVs and exercise the loader without contacting YouTube or downloading audio. Check at least:
-
-- `songs.csv` loads both songs and trims the example artist in its normalized value.
-- `My Spotify Library.csv` loads with its BOM and retains all extra fields per row.
-- A quoted comma in a title or album stays within one field; UTF-8 characters survive unchanged.
-- Missing, duplicate, and likely headerless headers receive distinct, useful messages. A headerless first song is never lost.
-- Blank rows are ignored; missing title/artist and rows with too many or too few cells report the correct location and prevent a partial download run.
-- `.txt` conversion handles accept, decline, invalid content, and an existing `.csv` destination without losing either file.
-- The chooser rejects invalid numbers and never offers `download_errors.txt` as input.
-- The on-screen song list remains correct and no full-row debug dump appears.
-
-**Done when:** both supplied CSVs load correctly, invalid input cannot silently lose songs, file selection tells the truth about supported formats, and the input path can be checked without invoking the downloader. Then mark step 1 complete in [todo.md](todo.md) and move to its step 2, preserving row metadata throughout the program.
+All three open issues in [bugs_to_fix.md](bugs_to_fix.md) have a verified fix or a documented removal of the unsupported setting, and their regression tests pass. Update [todo.md](todo.md), [bugs_to_fix.md](bugs_to_fix.md), and the README to match the implemented behavior. Leave the network-block 403 classified as an environment issue unless new testing identifies another cause.

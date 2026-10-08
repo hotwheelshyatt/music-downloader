@@ -14,7 +14,18 @@
 - Do not automatically download when the target recording or YouTube candidate is ambiguous. Explain the reason and continue with later rows.
 - Preserve the original CSV fields alongside normalized fields so no export data disappears.
 
-## Implementation order
+## Next milestone: resolve the open bugs
+
+Use [steps.md](steps.md) as the implementation and test plan. Resolve all three open issues in [bugs_to_fix.md](bugs_to_fix.md) before moving to unrelated features. The first-result bug depends on the row metadata and matching work in roadmap steps 2–8; choosing a different result without verifying the recording is not a fix.
+
+- [ ] Decide whether to remove `SEARCH_YOUTUBE = False` or support validated direct URLs, then make the configuration behave as documented.
+- [ ] Make `process_song()` and `download_song()` use one artist-and-title output naming rule and an identity-aware duplicate check. Prevent collisions between different artists and between recordings by the same artist.
+- [ ] Preserve the full CSV record through processing, research the provider, identify a reliable MusicBrainz target, evaluate multiple YouTube results, and reject weak or ambiguous matches instead of taking the first result.
+- [ ] Add regression tests for all three bugs and rerun the CSV input suite. Update the README and bug statuses after the fixes are verified.
+
+The recorded HTTP 403 was caused by a network block on this computer and is not an open code bug. The `.txt` conversion issue is resolved.
+
+## Implementation roadmap
 
 ### 1. Normalize and validate CSV input
 
@@ -177,6 +188,8 @@
 - [ ] Investigate AcoustID/Chromaprint only after the first implementation works. Proposed flow: YouTube candidate audio → audio fingerprint → AcoustID → MusicBrainz recording. Research cost, API/usage rules, added downloads, and whether it materially improves matching before adding it. This is not required for the first version.
 
 ## Issue history and open bugs
+
+The three current code issues and their reproduction evidence are tracked in [bugs_to_fix.md](bugs_to_fix.md). The next milestone above covers all three.
 
 ### Diagnosed network issue: YouTube search returned HTTP 403
 
