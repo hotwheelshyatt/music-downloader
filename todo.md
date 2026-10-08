@@ -49,7 +49,7 @@ Get the code to run to our area of change
 
 See the variables, in a debugger or in a print statement
 
-Use the variables to branch to more logic
+
 
 Write good logic
 

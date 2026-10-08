@@ -26,7 +26,7 @@ DESTINATION = r"/Users/localadmin/Music/harrys_music"
 # INPUT_FILE = "songs.csv"
 # INPUT_FILE = "songs.txt"
 # INPUT_FILE = None
-INPUT_FILE = None
+INPUT_FILE = "songs.csv"
 
 # Whether to search YouTube automatically.
 SEARCH_YOUTUBE = True
@@ -147,19 +147,13 @@ def load_songs(input_file):
 
             for row in reader:
                 # Track name,Artist name
-                
-                if not row:
-                    continue
 
                 # cleans up trailing+leading white space in first 2 colloms
-                song = row['Track name'].strip()
-                artist = row['Artist name'].strip()
+                row['Track name'] = row['Track name'].strip()
+                row['Artist name'] = row['Artist name'].strip()
 
-                d = dict(row)
-                d["Track name"] = song
-                d["Artist name"] = artist
-                songs.append(d)
-                print(d, "\n", songs)
+                songs.append(row)
+                print(f"{row}\n{songs}")
 
     else:
         raise ValueError("Input file must be CSV or TXT.")
