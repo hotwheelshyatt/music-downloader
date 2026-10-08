@@ -26,7 +26,7 @@ DESTINATION = r"/Users/localadmin/Music/harrys_music"
 # INPUT_FILE = "songs.csv"
 # INPUT_FILE = "songs.txt"
 # INPUT_FILE = None
-INPUT_FILE = "songs.txt"
+INPUT_FILE = None
 
 # Whether to search YouTube automatically.
 SEARCH_YOUTUBE = True
@@ -73,6 +73,7 @@ def clean_filename(name):
 
 
 def find_input_file():
+    print("find input file start")
     """
     Find the input CSV/TXT file next to this Python script.
     """
@@ -116,11 +117,12 @@ def find_input_file():
             return files[index]
         except (ValueError, IndexError):
             raise ValueError("Invalid input file selection.")
-
+    print("find input file end")
     return files[0]
 
 
 def load_songs(input_file):
+    print("load input file start")
     """
     Read songs from CSV or TXT.
 
@@ -131,40 +133,63 @@ def load_songs(input_file):
     Song Two,Artist Two
     """
 
+
+    # inital use case
     songs = []
 
     if input_file.suffix.lower() == ".csv":
 
         with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
-            reader = csv.reader(file)
+            # reader = csv.reader(file)
+            reader = csv.DictReader(file)
+            # csv_format = "2col"
+            # next(reader)
+            # print(reader.fieldnames)
+            # print("sucsess")
+            # exit(0)
 
-            for row_number, row in enumerate(reader, 1):
+            # for row_number, row in enumerate(reader, 1):
 
+            for row in reader:
+                # Track name,Artist name
+                
+
+                
                 if not row:
                     continue
 
-                if len(row) < 2:
-                    print(
-                        f"Warning: skipping CSV row {row_number}: "
-                        f"not enough columns."
-                    )
-                    continue
 
-                song = row[0].strip()
-                artist = row[1].strip()
+                print(row['Track name'], row['Artist name'])
 
+                # unessarty because of update to dictreader than jsut reader
+                # if len(row) < 2:
+                #     print(
+                #         f"Warning: skipping CSV row {row_number}: "
+                #         f"not enough columns."
+                #     )
+                #     continue
+
+                song = row['Track name'].strip()
+                artist = row['Artist name'].strip()
+                # song = row
+                # artist = row
+
+                # unessarty because of update to dictreader than jsut reader
                 # Skip header.
-                if (
-                    song.lower() in ("songname", "song", "title")
-                    and artist.lower() in ("artist", "artists")
-                ):
-                    continue
-
-                if song and artist:
-                    songs.append({
-                        "title": song,
-                        "artist": artist
-                    })
+                # if (
+                #     song.lower() in ("songname", "song", "title")
+                #     and artist.lower() in ("artist", "artists")
+                # ):
+                #     continue
+                d = dict(row)
+                d["title"] = song
+                d["artist"] = artist
+                songs.append(d)
+                # if song and artist:
+                #     songs.append({
+                #         "title": song,
+                #         "artist": artist
+                #     })
 
     elif input_file.suffix.lower() == ".txt":
 
@@ -208,7 +233,7 @@ def load_songs(input_file):
 
     else:
         raise ValueError("Input file must be CSV or TXT.")
-
+    print("load input file end")
     return songs
 
 
