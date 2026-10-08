@@ -73,7 +73,6 @@ def clean_filename(name):
 
 
 def find_input_file():
-    print("find input file start")
     """
     Find the input CSV/TXT file next to this Python script.
     """
@@ -117,123 +116,53 @@ def find_input_file():
             return files[index]
         except (ValueError, IndexError):
             raise ValueError("Invalid input file selection.")
-    print("find input file end")
     return files[0]
 
 
 def load_songs(input_file):
-    print("load input file start")
     """
     Read songs from CSV or TXT.
 
     Expected format:
 
-    Songname,Artist
+    Track name,Artist name,
     Song One,Artist One
     Song Two,Artist Two
+
+    OR
+    (example from https://www.tunemymusic.com/transfer)
+    Track name,Artist name,Album,Playlist name,Type,ISRC,Spotify - id
+    "Awake","Tycho","Awake","ADHD Focus Music (No Lyrics)","Playlist","US2J71309901","5lB3bZKPhng9s4hKB1sSIe"
+    "I Came Running","Ancient Astronauts","We Are To Answer","ADHD Focus Music (No Lyrics)","Playlist","USESL0914702","62e6CJOmmYiiwS9yKE5Gg6"
+
     """
 
-
-    # inital use case
     songs = []
 
     if input_file.suffix.lower() == ".csv":
 
         with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
-            # reader = csv.reader(file)
-            reader = csv.DictReader(file)
-            # csv_format = "2col"
-            # next(reader)
-            # print(reader.fieldnames)
-            # print("sucsess")
-            # exit(0)
 
-            # for row_number, row in enumerate(reader, 1):
+            reader = csv.DictReader(file)
 
             for row in reader:
                 # Track name,Artist name
                 
-
-                
                 if not row:
                     continue
 
-
-                print(row['Track name'], row['Artist name'])
-
-                # unessarty because of update to dictreader than jsut reader
-                # if len(row) < 2:
-                #     print(
-                #         f"Warning: skipping CSV row {row_number}: "
-                #         f"not enough columns."
-                #     )
-                #     continue
-
+                # cleans up trailing+leading white space in first 2 colloms
                 song = row['Track name'].strip()
                 artist = row['Artist name'].strip()
-                # song = row
-                # artist = row
 
-                # unessarty because of update to dictreader than jsut reader
-                # Skip header.
-                # if (
-                #     song.lower() in ("songname", "song", "title")
-                #     and artist.lower() in ("artist", "artists")
-                # ):
-                #     continue
                 d = dict(row)
-                d["title"] = song
-                d["artist"] = artist
+                d["Track name"] = song
+                d["Artist name"] = artist
                 songs.append(d)
-                # if song and artist:
-                #     songs.append({
-                #         "title": song,
-                #         "artist": artist
-                #     })
-
-    elif input_file.suffix.lower() == ".txt":
-
-        with open(input_file, "r", encoding="utf-8-sig") as file:
-
-            for line_number, line in enumerate(file, 1):
-
-                line = line.strip()
-
-                if not line:
-                    continue
-
-                # Ignore comments.
-                if line.startswith("#"):
-                    continue
-
-                parts = line.split(",", 1)
-
-                if len(parts) < 2:
-                    print(
-                        f"Warning: skipping TXT line {line_number}: "
-                        f"expected Songname,Artist"
-                    )
-                    continue
-
-                song = parts[0].strip()
-                artist = parts[1].strip()
-
-                # Skip header.
-                if (
-                    song.lower() in ("songname", "song", "title")
-                    and artist.lower() in ("artist", "artists")
-                ):
-                    continue
-
-                if song and artist:
-                    songs.append({
-                        "title": song,
-                        "artist": artist
-                    })
+                print(d, "\n", songs)
 
     else:
         raise ValueError("Input file must be CSV or TXT.")
-    print("load input file end")
     return songs
 
 
@@ -538,7 +467,7 @@ def apply_metadata(mp3_path, requested_title, requested_artist, metadata):
     # --------------------------------------------------------
 
     # IMPORTANT:
-    # The title is ALWAYS exactly what the user put in the
+    # The Track name is ALWAYS exactly what the user put in the
     # input file.
     tags["TIT2"] = TIT2(encoding=3, text=requested_title)
 
@@ -904,7 +833,7 @@ def process_song(song_number, total_songs, song, artist):
     print("=" * 65)
     print(f"SONG {song_number} / {total_songs}")
     print("=" * 65)
-    print(f"Title : {song}")
+    print(f"Track name : {song}")
     print(f"Artist: {artist}")
     print()
 
@@ -1095,7 +1024,7 @@ def main():
     for number, item in enumerate(songs, 1):
         print(
             f"{number:3}. "
-            f"{item['title']} - {item['artist']}"
+            f"{item['Track name']} - {item['Artist name']}"
         )
 
     print()
@@ -1126,8 +1055,8 @@ def main():
             process_song(
                 number,
                 len(songs),
-                item["title"],
-                item["artist"]
+                item["Track name"],
+                item["Artist name"]
             )
 
             successful += 1
@@ -1153,7 +1082,7 @@ def main():
             failed += 1
 
             error_message = (
-                f"{item['title']} - {item['artist']}\n"
+                f"{item['Track name']} - {item['Artist name']}\n"
                 f"{error}\n"
                 f"{'-' * 60}\n"
             )
