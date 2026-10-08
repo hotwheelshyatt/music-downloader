@@ -1,11 +1,14 @@
 import csv
 import json
-import os
 import re
 import shutil
 import sys
 import subprocess
+import tempfile
 from pathlib import Path
+
+from matching import MatchError, choose_youtube_video, identify_recording
+from output_files import choose_output_path, publish_mp3
 
 # ============================================================
 # CONFIGURATION
@@ -29,9 +32,6 @@ DESTINATION = r"/Users/localadmin/Music/harrys_music"
 # INPUT_FILE = None
 INPUT_FILE = "songs.csv"
 
-# Whether to search YouTube automatically.
-SEARCH_YOUTUBE = True
-
 # Download artwork and embed it into the MP3.
 EMBED_ARTWORK = True
 
@@ -39,7 +39,7 @@ EMBED_ARTWORK = True
 # Usually 5 is plenty.
 SEARCH_RESULTS = 5
 
-# Skip a song if an MP3 with the exact same filename already exists.
+# Skip a song only when an existing MP3 has the same MusicBrainz recording ID.
 SKIP_EXISTING = True
 
 # ============================================================
@@ -74,15 +74,6 @@ def print_header():
     print("                 MUSIC DOWNLOADER")
     print("=" * 65)
     print()
-
-
-def clean_filename(name):
-    """
-    Remove characters that Windows does not allow in filenames.
-    """
-    name = re.sub(r'[<>:"/\\|?*]', "", name)
-    name = name.strip().rstrip(".")
-    return name
 
 
 def find_input_file():
@@ -364,12 +355,12 @@ def check_ffmpeg():
         sys.exit(1)
 
 
-def search_youtube(song, artist):
+def search_youtube(song, artist, album=None):
     """
-    Search YouTube and return the best result URL.
+    Search YouTube and return candidates for verification.
     """
 
-    query = f"ytsearch{SEARCH_RESULTS}:{song} {artist}"
+    query = f"ytsearch{SEARCH_RESULTS}:{song} {artist} {album or ''}".strip()
 
     command = [
         sys.executable,
@@ -404,36 +395,23 @@ def search_youtube(song, artist):
     if not entries:
         raise RuntimeError("No YouTube results found.")
 
-    # First result is normally the best match.
-    entry = entries[0]
-
-    video_id = entry.get("id")
-
-    if not video_id:
-        raise RuntimeError("YouTube result did not contain a video ID.")
-
-    return f"https://www.youtube.com/watch?v={video_id}"
+    return entries
 
 
 # ------------------------------------------------------------
 # Download
 # ------------------------------------------------------------
 
-def download_song(song, artist, url):
+def download_song(url, staging_folder, stem):
     """
-    Download a song and return the resulting MP3 path.
+    Download into a temporary folder; publishing happens after tagging.
     """
 
-    expected_filename = clean_filename(song) + ".mp3"
-    expected_path = DESTINATION_PATH / expected_filename
-
-    if SKIP_EXISTING and expected_path.exists():
-        print("Already exists - skipping.")
-        return expected_path
+    expected_path = staging_folder / (stem + ".mp3")
 
     # Temporary filename.
     output_template = str(
-        DESTINATION_PATH / f"{clean_filename(song)}.%(ext)s"
+        staging_folder / f"{stem}.%(ext)s"
     )
 
     command = [
@@ -489,16 +467,6 @@ def download_song(song, artist, url):
         return expected_path
 
     # Look for an MP3 if the exact name wasn't found.
-    possible_mp3s = list(DESTINATION_PATH.glob("*.mp3"))
-
-    matching = [
-        p for p in possible_mp3s
-        if p.stem.lower() == clean_filename(song).lower()
-    ]
-
-    if matching:
-        return matching[0]
-
     raise RuntimeError(
         "Download completed, but the resulting MP3 could not be found."
     )
@@ -575,6 +543,7 @@ def apply_metadata(mp3_path, requested_title, requested_artist, metadata):
             TRCK,
             TPOS,
             TDRC,
+            TSRC,
             TCON,
             TCMP,
             TCOM,
@@ -867,22 +836,55 @@ def apply_metadata(mp3_path, requested_title, requested_artist, metadata):
             text=duration
         )
 
+    isrc = safe_metadata_value(metadata, "isrc")
+    if isrc:
+        tags["TSRC"] = TSRC(encoding=3, text=isrc)
+
+    recording_id = safe_metadata_value(metadata, "musicbrainz_recording_id")
+    if recording_id:
+        tags["TXXX:MUSICBRAINZ_RECORDING_ID"] = TXXX(
+            encoding=3, desc="MUSICBRAINZ_RECORDING_ID", text=recording_id
+        )
+
+    release_id = safe_metadata_value(metadata, "musicbrainz_release_id")
+    if release_id:
+        tags["TXXX:MUSICBRAINZ_RELEASE_ID"] = TXXX(
+            encoding=3, desc="MUSICBRAINZ_RELEASE_ID", text=release_id
+        )
+
     # Save metadata.
     audio.save()
 
     return audio
 
 
+def tag_metadata(row, target, video):
+    """CSV fields override verified release fields, then YouTube fields."""
+    result = dict(video)
+    release = target.get("release")
+    if release:
+        if release.get("title"):
+            result["album"] = release["title"]
+        if release.get("date"):
+            result["release_date"] = release["date"]
+        result["musicbrainz_release_id"] = release.get("id")
+    if row.get("album"):
+        result["album"] = row["album"]
+    result["album_artist"] = target["artist"]
+    result["musicbrainz_recording_id"] = target["id"]
+    if target.get("isrc"):
+        result["isrc"] = target["isrc"]
+    return result
+
+
 # ------------------------------------------------------------
 # Artwork
 # ------------------------------------------------------------
 
-def find_thumbnail(song):
+def find_thumbnail(stem, folder):
     """
     Find a thumbnail temporarily downloaded by yt-dlp.
     """
-
-    base = clean_filename(song)
 
     possible_extensions = [
         ".jpg",
@@ -893,7 +895,7 @@ def find_thumbnail(song):
 
     for extension in possible_extensions:
 
-        path = DESTINATION_PATH / (base + extension)
+        path = folder / (stem + extension)
 
         if path.exists():
             return path
@@ -947,24 +949,11 @@ def embed_artwork(mp3_path, artwork_path):
         print(f"Warning: could not embed artwork: {error}")
 
 
-def remove_thumbnail(artwork_path):
-    """
-    Delete the temporary thumbnail.
-    """
-
-    if artwork_path and artwork_path.exists():
-
-        try:
-            artwork_path.unlink()
-        except Exception:
-            pass
-
-
 # ------------------------------------------------------------
 # Main processing
 # ------------------------------------------------------------
 
-def process_song(song_number, total_songs, song, artist):
+def process_song(song_number, total_songs, row):
     """
     Process one song.
     """
@@ -973,107 +962,49 @@ def process_song(song_number, total_songs, song, artist):
     print("=" * 65)
     print(f"SONG {song_number} / {total_songs}")
     print("=" * 65)
+    song = row["track_name"]
+    artist = row["artist_name"]
     print(f"Track name : {song}")
     print(f"Artist: {artist}")
     print()
 
-    filename = clean_filename(song) + ".mp3"
-    destination_file = DESTINATION_PATH / filename
+    print("Identifying recording with MusicBrainz...")
+    target = identify_recording(row)
+    print(f"Recording: {target['title']} - {target['artist']} ({target['id']})")
 
-    if SKIP_EXISTING and destination_file.exists():
-        print(f"Already exists: {filename}")
-        return True
+    print("Searching YouTube candidates...")
+    entries = search_youtube(song, artist, row.get("album"))
+    score, url, video, reasons = choose_youtube_video(row, target, entries, get_metadata)
+    print(f"Selected: {url}")
+    print(f"Confidence: {score}/100; {', '.join(reasons)}")
 
-    # --------------------------------------------------------
-    # Search
-    # --------------------------------------------------------
+    destination, skip = choose_output_path(row, target["id"], DESTINATION_PATH, SKIP_EXISTING)
+    if skip:
+        print(f"Already downloaded recording: {destination.name}")
+        return "skipped"
 
-    if SEARCH_YOUTUBE:
-        print("Searching YouTube...")
-
-        url = search_youtube(
-            song,
-            artist
-        )
-
-        print(f"Selected: {url}")
-
-    else:
-        raise RuntimeError(
-            "SEARCH_YOUTUBE is disabled, but no direct URL was supplied."
-        )
-
-    # --------------------------------------------------------
-    # Get metadata before downloading
-    # --------------------------------------------------------
-
-    print("Reading metadata...")
-
-    metadata = get_metadata(url)
-
-    found_title = safe_metadata_value(
-        metadata,
-        "title"
-    )
-
-    found_artist = safe_metadata_value(
-        metadata,
-        "artist",
-        "uploader"
-    )
-
-    if found_title:
-        print(f"Found title : {found_title}")
-
-    if found_artist:
-        print(f"Found artist: {found_artist}")
-
-    # --------------------------------------------------------
-    # Download
-    # --------------------------------------------------------
-
-    mp3_path = download_song(
-        song,
-        artist,
-        url
-    )
-
-    print(f"Downloaded: {mp3_path.name}")
-
-    # --------------------------------------------------------
-    # Artwork
-    # --------------------------------------------------------
-
-    artwork_path = None
-
-    if EMBED_ARTWORK:
-        artwork_path = find_thumbnail(song)
-
-    # --------------------------------------------------------
-    # Metadata
-    # --------------------------------------------------------
-
-    print("Writing metadata...")
-
-    apply_metadata(
-        mp3_path,
-        requested_title=song,
-        requested_artist=artist,
-        metadata=metadata
-    )
-
-    if artwork_path:
-        embed_artwork(
+    with tempfile.TemporaryDirectory(prefix=".musicdownloader-", dir=DESTINATION_PATH) as folder:
+        staging_folder = Path(folder)
+        mp3_path = download_song(url, staging_folder, destination.stem)
+        print("Writing metadata...")
+        apply_metadata(
             mp3_path,
-            artwork_path
+            requested_title=song,
+            requested_artist=artist,
+            metadata=tag_metadata(row, target, video),
         )
+        if EMBED_ARTWORK:
+            artwork_path = find_thumbnail(destination.stem, staging_folder)
+            if artwork_path:
+                embed_artwork(mp3_path, artwork_path)
+        publish_mp3(mp3_path, destination, target["id"])
 
-        remove_thumbnail(artwork_path)
+    print(f"Saved: {destination.name}")
 
     print()
     print("DONE")
 
-    return True
+    return "downloaded"
 
 
 def main():
@@ -1143,7 +1074,7 @@ def main():
     # Confirmation
     # --------------------------------------------------------
 
-    print("The following songs will be downloaded:")
+    print("The following songs will be checked and downloaded if matched:")
     print()
 
     for number, item in enumerate(songs, 1):
@@ -1167,6 +1098,7 @@ def main():
     # --------------------------------------------------------
 
     successful = 0
+    skipped = 0
     failed = 0
 
     # Clear old error log.
@@ -1177,14 +1109,15 @@ def main():
 
         try:
 
-            process_song(
+            result = process_song(
                 number,
                 len(songs),
-                item["track_name"],
-                item["artist_name"]
+                item,
             )
-
-            successful += 1
+            if result == "skipped":
+                skipped += 1
+            else:
+                successful += 1
 
         except KeyboardInterrupt:
 
@@ -1201,6 +1134,15 @@ def main():
                 )
 
             break
+
+        except MatchError as error:
+            skipped += 1
+            print(f"SKIPPED: {error}")
+            with open(ERROR_LOG, "a", encoding="utf-8") as log:
+                log.write(
+                    f"Line {item['source_line']}: {item['track_name']} - {item['artist_name']}\n"
+                    f"Skipped: {error}\n{'-' * 60}\n"
+                )
 
         except Exception as error:
 
@@ -1233,12 +1175,13 @@ def main():
     print("=" * 65)
     print()
     print(f"Successful: {successful}")
+    print(f"Skipped:    {skipped}")
     print(f"Failed:     {failed}")
     print(f"Destination: {DESTINATION_PATH}")
 
-    if failed:
+    if ERROR_LOG.exists():
         print()
-        print(f"Errors were saved to:")
+        print("Skipped rows and errors were saved to:")
         print(f"  {ERROR_LOG}")
 
     print()

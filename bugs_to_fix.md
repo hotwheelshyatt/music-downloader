@@ -1,37 +1,33 @@
-# Bugs to fix
+# Bug report
 
-## Test results for the CSV input milestone
+## Current status
 
-`python3 -B -m unittest discover -s tests -q` and `venv/bin/python -B -m unittest discover -s tests -q` each passed **28 tests**. The suite covers both supplied CSVs, UTF-8/BOM, quoted commas, multiline values, missing and duplicate headers, malformed rows, headerless input, `.txt` conversion and collision safety, picker choices, and the main program's input and error-continuation paths. Those tests use temporary files and mocked download dependencies; they do not contact YouTube or download audio.
+The three bugs found after the CSV input milestone are fixed and have regression tests. The full local suite passes in both the system Python and the project virtual environment. Tests mock MusicBrainz and YouTube; they do not prove live YouTube access or audio identity. A live download remains untested because this computer's YouTube connection is blocked.
 
-**No failing CSV input tests remain from this milestone.** The issues below were reproduced with local, non-network probes or are directly visible in the current downstream code. They are outside the completed input milestone.
+## Resolved bugs
 
-## Input issues found and fixed during testing
+### First YouTube result was downloaded without verification
 
-- A malformed quoted CSV row initially reported the wrong line because `DictReader.line_num` was stale after a parsing exception. The error now uses the underlying CSV reader's line number; the regression test checks it.
-- A `.txt` conversion failure could have removed a destination file created by another process after the initial existence check. Conversion now creates the destination exclusively and only removes a partial file it created itself; the race and failed-copy tests pass.
-- Leading blank CSV rows initially prevented header detection. The loader now skips them and reports the correct physical line for later records.
+**Previous behavior:** `search_youtube()` returned `entries[0]`, which could be a cover, live version, or unrelated upload.
 
-## Open issues
+**Fix:** The program first identifies a MusicBrainz recording, inspects up to five YouTube results, scores title, artist, duration, explicit album and ISRC evidence, rejects unwanted versions, and skips weak or close matches. Tests cover a first-result cover with a better later match, weak candidates, ties, and a requested live version.
 
-### 1. YouTube search always chooses the first candidate
+### Different songs could share one MP3 filename
 
-- **Evidence:** A mocked search with two candidates returned the first candidate's URL without evaluating the second. `search_youtube()` uses `entries[0]`.
-- **Impact:** A cover, live recording, remix, or unrelated video can be downloaded even when a better result exists.
-- **Fix:** Follow [todo.md](todo.md) steps 3–8: identify the intended recording, compare multiple YouTube results, and require a confident match before downloading.
+**Previous behavior:** The output filename used only the title, so `Same.mp3` could stand for different artists or recordings.
 
-### 2. Different songs can share the same MP3 filename
+**Fix:** Output starts with `Artist - Track.mp3`. The saved MusicBrainz recording ID identifies repeats; another or unverified recording gets a stable ID suffix. New files are created exclusively, and an existing file is replaced only when its ID matches. Tests cover different artists, same-artist recordings, legacy files, case and cleaned-name collisions, repeat rows, and both `SKIP_EXISTING` settings.
 
-- **Evidence:** With an existing `Same.mp3`, a mocked call to `download_song("Same", "Different Artist", ...)` returned the existing file and never invoked the downloader. The output name uses only the track title.
-- **Impact:** Songs by different artists, or different recordings with the same title, can be incorrectly skipped or overwritten.
-- **Fix:** Follow [todo.md](todo.md) step 12: include artist and enough recording identity in filenames and duplicate checks.
+### Disabling YouTube search made every new song fail
 
-### 3. Disabling YouTube search makes every new song fail
+**Previous behavior:** `SEARCH_YOUTUBE = False` raised before a URL could be supplied.
 
-- **Evidence:** With `SEARCH_YOUTUBE = False`, `process_song()` raises `SEARCH_YOUTUBE is disabled, but no direct URL was supplied.` There is no direct-URL input path in the current song record.
-- **Impact:** The configuration switch cannot be used to download new songs.
-- **Fix:** Decide whether direct URLs will be supported. If so, validate and pass them into `process_song()`; otherwise remove or clearly disable this configuration option.
+**Fix:** The unsupported switch and dead branch were removed. Search is the only supported input path, and the README describes that path.
 
 ## Diagnosed environment issue
 
-The HTTP 403 recorded for `Hailing Taquitos - Parry Gripp` was traced by the user to a network block preventing access to YouTube. It is not an open `yt-dlp` code bug. Other HTTP 403 errors should be diagnosed on their own evidence.
+The `HTTP Error 403: Forbidden` recorded for `Hailing Taquitos - Parry Gripp` was traced by the user to a network block preventing access to YouTube. Restore YouTube access before retrying that song. Other 403 responses should be diagnosed separately.
+
+## Earlier CSV input fixes
+
+The first milestone fixed misleading `.txt` picker behavior, malformed CSV line reporting, a `.txt` conversion collision race, and leading blank CSV rows. Their regression tests remain in the suite.

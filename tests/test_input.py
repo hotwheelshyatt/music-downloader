@@ -298,11 +298,35 @@ class InputTests(unittest.TestCase):
              contextlib.redirect_stdout(output):
             main.main()
         self.assertEqual(download.call_count, 2)
-        self.assertEqual(download.call_args_list[0].args, (1, 2, "First", "Artist A"))
-        self.assertEqual(download.call_args_list[1].args, (2, 2, "Second", "Artist B"))
+        self.assertEqual(download.call_args_list[0].args[:2], (1, 2))
+        self.assertEqual(download.call_args_list[0].args[2]["track_name"], "First")
+        self.assertEqual(download.call_args_list[0].args[2]["artist_name"], "Artist A")
+        self.assertEqual(download.call_args_list[1].args[2]["track_name"], "Second")
+        self.assertEqual(download.call_args_list[1].args[2]["artist_name"], "Artist B")
         self.assertIn("First - Artist A", error_log.read_text(encoding="utf-8"))
         self.assertIn("Successful: 1", output.getvalue())
         self.assertIn("Failed:     1", output.getvalue())
+
+    def test_main_logs_ambiguous_row_and_continues(self):
+        self.make_file("songs.csv", "Track name,Artist name\nFirst,Artist A\nSecond,Artist B\n")
+        error_log = self.folder / "download_errors.txt"
+        output = io.StringIO()
+        with patch.object(main, "SCRIPT_FOLDER", self.folder), \
+             patch.object(main, "DESTINATION_PATH", self.folder / "output"), \
+             patch.object(main, "INPUT_FILE", "songs.csv"), \
+             patch.object(main, "ERROR_LOG", error_log), \
+             patch.object(main, "check_yt_dlp"), patch.object(main, "check_ffmpeg"), \
+             patch.dict("sys.modules", {"mutagen": types.ModuleType("mutagen")}), \
+             patch("builtins.input", side_effect=["y", ""]), \
+             patch.object(main, "process_song", side_effect=[main.MatchError("ambiguous recordings"), "downloaded"]) as download, \
+             contextlib.redirect_stdout(output):
+            main.main()
+        self.assertEqual(download.call_count, 2)
+        self.assertIn("Line 2: First - Artist A", error_log.read_text(encoding="utf-8"))
+        self.assertIn("Skipped: ambiguous recordings", error_log.read_text(encoding="utf-8"))
+        self.assertIn("Successful: 1", output.getvalue())
+        self.assertIn("Skipped:    1", output.getvalue())
+        self.assertIn("Skipped rows and errors were saved to:", output.getvalue())
 
 
 if __name__ == "__main__":

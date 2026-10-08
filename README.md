@@ -1,11 +1,11 @@
 # Music Downloader
 
-`main.py` reads a song list from a CSV file, searches YouTube, downloads MP3s with `yt-dlp`, and adds available tags and artwork. Download only audio you have permission to use.
+`main.py` reads a CSV song list, verifies each recording with MusicBrainz, compares several YouTube results, and saves confident matches as tagged MP3s. Download only audio you have permission to use.
 
-## Set up
+## Set up and run
 
-1. Install Python 3, FFmpeg, and [Deno](https://docs.deno.com/runtime/getting_started/installation/) for YouTube support. Check them with `ffmpeg -version` and `deno --version`.
-2. In this folder, create a virtual environment and install the Python packages:
+1. Install Python 3, FFmpeg, and [Deno](https://docs.deno.com/runtime/getting_started/installation/). Check `ffmpeg -version` and `deno --version`.
+2. Install the Python packages:
 
    ```bash
    python3 -m venv venv
@@ -13,38 +13,23 @@
    python -m pip install -U "yt-dlp[default]" mutagen
    ```
 
-   On Windows, use `py -m venv venv` and `venv\Scripts\activate` instead of the first two commands.
-3. Open `main.py` and set `DESTINATION` to the folder where MP3s should be saved. Set `INPUT_FILE` to your CSV filename, or to `None` to choose from files beside the script.
+   On Windows, use `py -m venv venv` and `venv\Scripts\activate`.
+3. Set `DESTINATION` and `INPUT_FILE` near the top of `main.py`. Set `INPUT_FILE = None` to choose a file beside the script.
+4. Run `python main.py`, review the list, and confirm.
 
-## Prepare a CSV
+The CSV needs `Track name,Artist name` headers. `Album` and `ISRC` can help identify the recording; other export fields remain available but are not automatically written as tags. `songs.csv` and `My Spotify Library.csv` are examples. CSV-formatted `.txt` files can be previewed and converted with confirmation.
 
-Put the CSV beside `main.py`. It needs these exact column headers:
-
-```csv
-Track name,Artist name
-Bohemian Rhapsody,Queen
-Take On Me,a-ha
-```
-
-The included `songs.csv` is a small example. `My Spotify Library.csv` also has the required headers and can be selected by setting `INPUT_FILE = "My Spotify Library.csv"`. Its extra columns are read and preserved, but are not yet used for searches or MP3 tags; that work is planned in [todo.md](todo.md).
-
-The input picker also recognizes CSV-formatted `.txt` files. It previews and validates one, then asks before converting it to `.csv`. It will not overwrite an existing CSV.
-
-## Run
-
-With the virtual environment active, run `python main.py` from this folder. Review the song list and confirm when prompted. Finished MP3s go to `DESTINATION`. The program skips an existing MP3 with the same track-name filename when `SKIP_EXISTING = True`.
+Songs without a clear MusicBrainz recording or YouTube match are skipped and recorded in `download_errors.txt`. Saved files use `Artist - Track.mp3`; a MusicBrainz ID suffix distinguishes recordings with the same name. `SKIP_EXISTING = True` skips only a file tagged with the same recording ID. Matching rules and provider limits are in [provider_research.md](provider_research.md).
 
 ## Troubleshooting
 
-| Problem | What to check |
+| Problem | What to do |
 | --- | --- |
-| `yt-dlp` or Mutagen is missing | Activate the virtual environment, then run `python -m pip install -U "yt-dlp[default]" mutagen`. |
-| FFmpeg was not found | Install FFmpeg and confirm `ffmpeg -version` works in the same terminal. |
-| YouTube reports missing JavaScript support | Check `deno --version` and reinstall `yt-dlp` with the command above. See the [yt-dlp setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS). |
-| Input file not found | Check `INPUT_FILE` in `main.py` and put that file beside the script. With `INPUT_FILE = None`, the script asks which file to use if it finds several. |
-| CSV load fails | Use the headers `Track name,Artist name` and fill both columns. The error names missing headers, malformed rows, or invalid UTF-8; correct the reported line and retry. |
-| Wrong recording downloaded | The current search takes the first YouTube result. Check the `Selected:` URL shown in the terminal; improved matching is on the todo list. |
-| YouTube search fails with HTTP 403 | Check whether this computer can access YouTube. The 403 recorded in `download_errors.txt` was caused by a network block; restore access before retrying. Diagnose other 403 errors separately. |
-| A song fails while others continue | Read `download_errors.txt` beside the script. Correct the issue and rerun; existing MP3s are normally skipped. |
+| Python package or FFmpeg missing | Activate `venv`, reinstall the packages above, and check `ffmpeg -version` in that terminal. |
+| YouTube says JavaScript support is missing | Check `deno --version` and update `yt-dlp`; see its [JavaScript setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS). |
+| CSV fails to load | Use the required headers, fill title and artist, and correct the line named in the error. |
+| MusicBrainz is unavailable or a row is ambiguous | Check connectivity and the row's title, artist, album, and ISRC. Ambiguous rows are skipped instead of guessed. |
+| YouTube search reports HTTP 403 | Check whether this computer can reach YouTube. The 403 previously recorded for `Hailing Taquitos - Parry Gripp` came from a network block; diagnose other 403 errors separately. |
+| A song was skipped or failed | Read `download_errors.txt` for the row and reason, then correct the issue and rerun. |
 
-Metadata and artwork depend on what the selected YouTube upload provides. Songs with the same title currently use the same output filename, even when their artists differ; this is tracked in [todo.md](todo.md).
+The automated suite runs with `python -B -m unittest discover -s tests -q`. It uses mocked services; live downloads require reachable YouTube access.
