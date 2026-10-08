@@ -1,8 +1,8 @@
-# Music Downloader: implementation plan and bug report
+# Music Downloader: development TODO
 
-## Current behavior and goal
+## Current status
 
-`main.py` validates CSV input, preserves normalized and original row fields, and can convert CSV-formatted `.txt` files after confirmation. It now checks MusicBrainz for a recording, scores several YouTube candidates, and saves a matched MP3 under an artist-and-title name with recording-aware collision handling. Uncertain matches are skipped. Metadata and artwork work remains below.
+CSV input, MusicBrainz recording lookup, multiple YouTube candidate scoring, and recording-aware MP3 filenames are implemented. Uncertain matches are skipped. The remaining work is to improve tag sources, release artwork, per-row reporting, and end-to-end verification.
 
 **Target flow:** CSV validation → preserve and normalize row data → identify a recording and release with MusicBrainz → search and evaluate multiple YouTube candidates → download only a confident match → apply tags and artwork → record a clear outcome for every row.
 
@@ -14,16 +14,15 @@
 - Do not automatically download when the target recording or YouTube candidate is ambiguous. Explain the reason and continue with later rows.
 - Preserve the original CSV fields alongside normalized fields so no export data disappears.
 
-## Completed bug-fix milestone
+## Next step: finish metadata and artwork
 
-The three issues in [bugs_to_fix.md](bugs_to_fix.md) were addressed. [steps.md](steps.md) records the implementation and test results; [provider_research.md](provider_research.md) records the matching rules and source decision.
+- [ ] Map each supported MP3 tag to a source and priority: CSV first, verified MusicBrainz second, reliable YouTube metadata last. Keep uncertain fields empty.
+- [ ] Verify Cover Art Archive access and use artwork from the selected release when available. Use a YouTube thumbnail only when no reliable release image is available.
+- [ ] Add focused tests for tag priority, conflicting values, missing artwork, artwork fallback, and failures that should not stop later songs.
+- [ ] Improve the per-row log and end summary so skipped, ambiguous, and failed rows have clear reasons and next actions.
+- [ ] Run a permitted live end-to-end download when YouTube access is available. Automated tests currently use mocked services.
 
-- [x] Remove the unsupported `SEARCH_YOUTUBE = False` setting and dead branch.
-- [x] Use one artist-and-title naming rule and a MusicBrainz recording ID for duplicate checks.
-- [x] Preserve the full CSV row, identify a MusicBrainz recording, evaluate multiple YouTube results, and skip weak or ambiguous matches.
-- [x] Add regression tests for the three bugs, run the local test suite, and update the README and bug statuses.
-
-The recorded HTTP 403 was caused by a network block on this computer and is not an open code bug. The `.txt` conversion issue is resolved.
+Matching rules and the provider decision are in [provider_research.md](provider_research.md). Track any newly discovered code bugs in [bugs_to_fix.md](bugs_to_fix.md). The earlier YouTube HTTP 403 was caused by a network block on this computer.
 
 ## Implementation roadmap
 
@@ -78,9 +77,9 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 
 **Decide first**
 
-- [ ] Document how MusicBrainz distinguishes recordings, releases, and release groups, and which one each CSV field can identify. Do not treat a release group as a specific release or an ISRC as proof of a particular album edition.
+- [x] Document how MusicBrainz distinguishes recordings, releases, and release groups, and why an ISRC does not prove a particular album edition. See [provider_research.md](provider_research.md).
 - [ ] Define how to score or otherwise evaluate multiple MusicBrainz matches using title, artist, ISRC, album, duration when available, and version clues. Decide tie-breaking and a minimum confidence rule.
-- [ ] Define which release to use for release-specific tags and artwork when the recording appears on multiple releases. Decide how to report an ambiguous or absent match.
+- [x] Use a release only when one linked release clearly matches the CSV album; otherwise leave the release unknown. Skip when the recording itself is ambiguous.
 
 **Implement**
 
@@ -91,8 +90,8 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 
 **Decide first**
 
-- [ ] Define search queries from the CSV and verified target metadata, including when album, ISRC, or version terms actually help.
-- [ ] Decide how many results to inspect and which YouTube fields can be collected for comparison before download.
+- [x] Search from the CSV title, artist, and optional album; use the ISRC and version clues for verification rather than assuming they work as YouTube search terms.
+- [x] Inspect up to five results and fetch each candidate's available video metadata before selection.
 
 **Implement**
 
@@ -102,9 +101,9 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 
 **Decide first**
 
-- [ ] Define a readable score or equivalent rule using track title, artist, album, duration, ISRC or other identifiers when present, video title/description, channel information, and version indicators.
-- [ ] Penalize or reject covers, live performances, remixes, slowed or sped-up versions, nightcore, karaoke, instrumentals, and unrelated videos unless the CSV explicitly requests that version.
-- [ ] Decide how missing or unreliable YouTube metadata affects confidence. Do not treat a matching title alone as proof of the intended recording.
+- [x] Define the title, artist, duration, explicit album, ISRC, and version checks in [provider_research.md](provider_research.md).
+- [x] Reject unrequested covers, live performances, remixes, slowed or sped-up versions, nightcore, karaoke, instrumentals, and unrelated videos.
+- [x] Require evidence beyond title and artist; skip weak candidates when metadata is missing.
 
 **Implement**
 
@@ -114,7 +113,7 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 
 **Decide first**
 
-- [ ] Choose and document a reasonable minimum confidence threshold and tie/near-tie rule. Define whether ambiguous rows are skipped or offered for explicit user choice.
+- [x] Require a score of at least 80 and a lead of at least 10 points; skip ambiguous rows.
 
 **Implement**
 
@@ -124,11 +123,11 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 
 **Decide first**
 
-- [ ] Define what download state is kept per row, including the selected source, failed attempts, and any partially created files.
+- [ ] Record the selected source and processing stage per row so a failed attempt is easy to diagnose.
 
 **Implement**
 
-- [ ] Pass only the accepted candidate to `yt-dlp`, convert to MP3, and continue processing later rows if one download fails.
+- [x] Pass only the accepted candidate to `yt-dlp`, convert to MP3 in a temporary folder, and continue after a row fails.
 
 ### 10. Write MP3 metadata
 
@@ -157,8 +156,8 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 
 **Decide first**
 
-- [ ] Define a filename using artist and title, with safe character handling and a stable way to distinguish multiple recordings by the same artist with the same title.
-- [ ] Define when an existing file is truly the same recording, when to skip it, and when to choose another name. Never overwrite a different recording accidentally.
+- [x] Use a safe artist-and-title filename and a stable recording ID suffix when names collide.
+- [x] Skip only a file with the same saved recording ID; give a different or unidentified recording a separate name.
 
 **Implement**
 
@@ -186,24 +185,3 @@ The recorded HTTP 403 was caused by a network block on this computer and is not 
 ### 15. Optional later enhancement: audio fingerprinting
 
 - [ ] Investigate AcoustID/Chromaprint only after the first implementation works. Proposed flow: YouTube candidate audio → audio fingerprint → AcoustID → MusicBrainz recording. Research cost, API/usage rules, added downloads, and whether it materially improves matching before adding it. This is not required for the first version.
-
-## Issue history and open bugs
-
-The three code issues and their regression evidence are tracked in [bugs_to_fix.md](bugs_to_fix.md). The bug-fix milestone above covers all three.
-
-### Diagnosed network issue: YouTube search returned HTTP 403
-
-- **Evidence:** `download_errors.txt` records `Hailing Taquitos - Parry Gripp` failing during YouTube search with `HTTP Error 403: Forbidden`.
-- **Confirmed cause for this incident:** Testing found a network block on this computer that prevented access to YouTube. The recorded 403 came from unavailable YouTube connectivity; it is not an open `yt-dlp` bug to investigate.
-- **Action:** No code fix is planned for this incident. Restore YouTube access on the network before retrying the song. Other HTTP 403 errors should be diagnosed separately rather than assumed to have the same cause.
-
-### Resolved: picker offered `.txt` files that the loader rejected
-
-- **Reproduction:** Set `INPUT_FILE = None`, select a `.txt` file, and load it.
-- **Previous behavior:** `find_input_file()` offered the file; `load_songs()` raised `Input file must be CSV or TXT.`
-- **Resolution:** The picker labels `.txt` as a conversion choice. The program previews and validates it, asks before conversion, and refuses to overwrite an existing `.csv` file.
-
-### Resolved: different songs shared one output filename
-
-- **Previous behavior:** `download_song()` named MP3s from the title alone, and `SKIP_EXISTING` checked that name.
-- **Resolution:** Artist and title form the base name. Existing files are compared using their saved MusicBrainz recording ID; an unknown or different recording receives an ID suffix, and publishing refuses to overwrite a different file.

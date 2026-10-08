@@ -33,3 +33,5 @@ Songs without a clear MusicBrainz recording or YouTube match are skipped and rec
 | A song was skipped or failed | Read `download_errors.txt` for the row and reason, then correct the issue and rerun. |
 
 The automated suite runs with `python -B -m unittest discover -s tests -q`. It uses mocked services; live downloads require reachable YouTube access.
+
+Current development work is tracked in [todo.md](todo.md). [bugs_to_fix.md](bugs_to_fix.md) lists newly discovered code bugs; the previous reported bugs have been resolved.
