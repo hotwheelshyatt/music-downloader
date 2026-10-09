@@ -1,5 +1,6 @@
-Hailing Taquitos - Parry Gripp
-YouTube search failed:
-WARNING: [youtube:search] query "Hailing Taquitos Parry Gripp": Unable to download webpage: HTTP Error 403: Forbidden (caused by <HTTPError 403: Forbidden>)
-ERROR: query "Hailing Taquitos Parry Gripp" page 1: Unable to download API page: HTTP Error 403: Forbidden (caused by <HTTPError 403: Forbidden>)
+Line 2: Hailing Taquitos - Parry Gripp
+Skipped: No MusicBrainz recording matches the requested title and artist confidently.
+------------------------------------------------------------
+Line 3: example song 2 - example artist 2
+Skipped: No MusicBrainz recording matches the requested title and artist confidently.
 ------------------------------------------------------------
